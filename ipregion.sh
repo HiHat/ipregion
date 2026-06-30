@@ -130,6 +130,7 @@ declare -A CUSTOM_SERVICES=(
   [SPOTIFY]="Spotify"
   [REDDIT]="Reddit"
   [DISNEY_PLUS]="Disney+"
+  [GEMINI_SUPPORTED]="Gemini Supported"
   [REDDIT_GUEST_ACCESS]="Reddit (Guest Access)"
   [YOUTUBE_PREMIUM]="YouTube Premium"
   [GOOGLE_SEARCH_CAPTCHA]="Google Search Captcha"
@@ -153,6 +154,7 @@ CUSTOM_SERVICES_ORDER=(
   "SPOTIFY"
   "REDDIT"
   "DISNEY_PLUS"
+  "GEMINI_SUPPORTED"
   "REDDIT_GUEST_ACCESS"
   "YOUTUBE_PREMIUM"
   "GOOGLE_SEARCH_CAPTCHA"
@@ -170,6 +172,7 @@ CUSTOM_SERVICES_ORDER=(
 declare -A CUSTOM_SERVICES_HANDLERS=(
   [GOOGLE]="lookup_google"
   [YOUTUBE]="lookup_youtube"
+  [GEMINI_SUPPORTED]="lookup_gemini_supported"
   [TWITCH]="lookup_twitch"
   [CHATGPT]="lookup_chatgpt"
   [NETFLIX]="lookup_netflix"
@@ -1074,7 +1077,6 @@ curl_wrapper() {
     --compressed
     --location
     --retry-connrefused
-    --retry-all-errors
     --retry "$CURL_RETRIES"
     --max-time "$CURL_TIMEOUT"
     -w '\n%{http_code}'
@@ -1706,11 +1708,46 @@ lookup_google() {
   local ip_version="$1"
   local response
 
-  response=$(curl_wrapper GET "https://www.google.com" \
+  response=$(curl_wrapper GET "https://accounts.google.com/v3/signin/identifier?flowName=GlifSetupAndroid" \
     --user-agent "$USER_AGENT" \
     --ip-version "$ip_version")
 
-  grep_wrapper --perl '"MgUcDb":"\K[^"]*' <<<"$response"
+  grep_wrapper --perl 'name="region" value="\K[^"]*' <<<"$response"
+}
+
+lookup_gemini_supported() {
+  local ip_version="$1"
+  local country_code country_name available color_name
+  local gemini_regions_url="https://ai.google.dev/gemini-api/docs/available-regions.md.txt"
+
+  country_code=$(lookup_google "$ip_version")
+
+  if [[ -z "$country_code" ]]; then
+    echo ""
+    return
+  fi
+
+  country_name=$(curl_wrapper GET "https://www.apicountries.com/alpha/${country_code}" \
+    --ip-version "4")
+  country_name=$(process_json "$country_name" ".name")
+
+  if [[ -z "$country_name" || "$country_name" == "null" ]]; then
+    echo ""
+    return
+  fi
+
+  local regions_md
+  regions_md=$(curl_wrapper GET "$gemini_regions_url" --ip-version "$ip_version")
+
+  if grep_wrapper -qi "^- ${country_name}$" <<<"$regions_md"; then
+    available="Yes"
+    color_name="SERVICE"
+  else
+    available="No"
+    color_name="HEART"
+  fi
+
+  print_value_or_colored "$available" "$color_name"
 }
 
 lookup_youtube() {
